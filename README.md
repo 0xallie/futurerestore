@@ -1,11 +1,11 @@
 # futurerestore
-[![CI Building](https://img.shields.io/github/workflow/status/futurerestore/futurerestore/CI)](https://github.com/futurerestore/futurerestore/actions?workflow=CI)
+[![CI Building](https://img.shields.io/github/workflow/status/futurerestore/futurerestore/CI?style=for-the-badge)](https://github.com/futurerestore/futurerestore/actions)
 
 __Make sure to read this page before continuing.__
 
 Latest **stable** compiled version can be found [here](https://github.com/futurerestore/futurerestore/releases).
 
-For A12-A14, and WiFi-only iPad restores - use the latest beta build for your platform [here](https://nightly.link/futurerestore/futurerestore/workflows/ci/test).
+For devices that support iOS 15, and WiFi-only iPad restores - use the latest beta build for your platform [here](https://nightly.link/futurerestore/futurerestore/workflows/ci/main).
 
 **There are currently no pre-compiled beta builds for Windows.**
 
@@ -15,6 +15,9 @@ __Only use if you are sure what you're doing.__
 ## What is FutureRestore?
 FutureRestore is a modified idevicerestore wrapper, which allows manually specifying SEP and Baseband for restoring. This allows unsigned firmwares to be restored onto devices, providing you have a backup of the APTicket (SHSH Blobs), and can recreate all the specific conditions of the APTicket e.g. ECID, APNonce, Board ID.
 
+# Support
+For support, join the [FutureRestore Support server](https://discord.com/invite/96wCSnwYVX) on Discord.
+
 # Features  
 * Supports the following downgrade methods:
   * Prometheus for 64-bit devices:
@@ -23,72 +26,43 @@ FutureRestore is a modified idevicerestore wrapper, which allows manually specif
   * Odysseus for 32-bit & 64-bit (A7-A11) devices
   * Re-restoring 32-bit devices to iOS 9.x with [alitek123](https://github.com/alitek12)'s no-ApNonce method (alternative — [idevicererestore](https://downgrade.party)).
 
-# Dependencies
-* ## External libs
-  Make sure these are installed
-  * [curl](https://github.com/curl/curl) (Linux/Windows only, macOS already has curl preinstalled);
-  * [openssl 1.1.1](https://github.com/openssl/openssl) (or CommonCrypto on macOS);
-  * [libusb 1.0.24](https://github.com/libusb/libusb) (Linux/Windows only, macOS can use IOKit for libirecovery);
-  * [libzip](https://github.com/nih-at/libzip);
-  * [libplist](https://github.com/libimobiledevice/libplist);
-  * [libusbmuxd](https://github.com/libimobiledevice/libusbmuxd);
-  * [libirecovery](https://github.com/libimobiledevice/libirecovery);
-  * [libimobiledevice](https://github.com/libimobiledevice/libimobiledevice);
-  * [libpng16](https://github.com/glennrp/libpng);
-  * [xpwn(fork)](https://github.com/nyuszika7h/xpwn);
-  * [libgeneral](https://github.com/tihmstar/libgeneral);
-  * [libfragmentzip](https://github.com/tihmstar/libfragmentzip);
-  * [libinsn](https://github.com/tihmstar/libinsn);
-  * [lzfse](https://github.com/lzfse/lzfse);
-  * [img4tool](https://github.com/tihmstar/img4tool);
-  * [liboffsetfinder64(fork))](https://github.com/Cryptiiiic/liboffsetfinder64);
-  * [libipatcher(fork)](https://github.com/Cryptiiiic/libipatcher)
-
-* ## Submodules
-  Make sure these projects compile on your system (install it's dependencies):
-
-  * [jssy](https://github.com/tihmstar/jssy);
-  * [tsschecker(fork)](https://github.com/1Conan/tsschecker);
-  * [idevicerestore(fork)](https://github.com/futurerestore/idevicerestore)
-
-  If you are cloning this repository you may run:
-
-  ```git clone https://github.com/futurerestore/futurerestore --recursive```
- 
-  which will clone these submodules for you.
+# Compiling
+See [COMPILING](COMPILING.md)
 
 
+# Futurerestore Usage
 Usage: `futurerestore [OPTIONS] iPSW`
 
-| option (short) | option (long)                                      | description                                                                       |
-|----------------|------------------------------------------|-----------------------------------------------------------------------------------|
-|  ` -t `           | ` --apticket PATH	 `                    | Signing tickets used for restoring, commonly known as blobs |
-|  ` -u `           | ` --update `                                    | Update instead of erase install (requires appropriate APTicket) |
-|                       |                                                           | This parameter is recommended to not be used for downgrading. If you are jailbroken, make sure to have your orig-fs snapshot restored (Restore RootFS).  |
-|  ` -w `           | ` --wait `                                        | Keep rebooting until ApNonce matches APTicket (ApNonce collision, unreliable) |
-|  ` -d `           | ` --debug `                                      | Show all code, use to save a log for debug testing |
-|  ` -e `           | ` --exit-recovery `                       | Exit recovery mode and quit |
-|  ` -c `           | ` --custom-latest VERSION `                       | Specify custom latest version to use for SEP, Baseband and other FirmwareUpdater components |
-|  ` -g `           | ` --custom-latest-buildid BUILDID `                       | Specify custom latest buildid to use for SEP, Baseband and other FirmwareUpdater components |
-|  ` -i `           | ` --custom-latest-beta `                       | Get custom url from list of beta firmwares |
-|                       | ` --use-pwndfu `                           | Restoring devices with Odysseus method. Device needs to be in pwned DFU mode already |
-|                       | ` --no-ibss `                           | Restoring devices with Odysseus method. For checkm8/iPwnder32 specifically, bootrom needs to be patched already with unless iPwnder. |
-|                       | ` --rdsk PATH `                           | Set custom restore ramdisk for entering restoremode(requires use-pwndfu) |
-|                       | ` --rkrn PATH `                           | Set custom restore kernelcache for entering restoremode(requires use-pwndfu) |
-|                       | ` --set-nonce `                           | Set custom nonce from your blob then exit recovery(requires use-pwndfu) |
-|                       | ` --set-nonce=0xNONCE `                           | Set custom nonce then exit recovery(requires use-pwndfu) |
-|                       | ` --serial `                           | Enable serial during boot(requires serial cable and use-pwndfu) |
-|                       | ` --boot-args "BOOTARGS" `                           | Set custom restore boot-args(PROCEED WITH CAUTION)(requires use-pwndfu) |
-|                       | ` --no-cache `                           | Disable cached patched iBSS/iBEC(requires use-pwndfu) |
-|                       | ` --skip-blob `                           | Skip SHSH blob validation(PROCEED WITH CAUTION)(requires use-pwndfu) |
-|                       | ` --latest-sep `                             | Use latest signed SEP instead of manually specifying one |
-|  ` -s `           | ` --sep PATH `                                 | Manually specify SEP to be flashed |
-|  ` -m `           | ` --sep-manifest PATH `              | BuildManifest for requesting SEP ticket |
-|                       | ` --latest-baseband `                | Use latest signed baseband instead of manually specifying one |
-|  ` -b `           | ` --baseband PATH	`                     | Manually specify baseband to be flashed |
-|  ` -p `           | ` --baseband-manifest PATH `  | BuildManifest for requesting baseband ticket |
-|                       | ` --no-baseband `                         | Skip checks and don't flash baseband |
-|                       |                                                           | Only use this for device without a baseband (eg. iPod touch or Wi-Fi only iPads) |
+| option (short) | option (long)                       | description                                                                                                                                             |
+|----------------|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ` -t `         | ` --apticket PATH	 `                | Signing tickets used for restoring, commonly known as blobs                                                                                             |
+| ` -u `         | ` --update `                        | Update instead of erase install (requires appropriate APTicket)                                                                                         |
+|                |                                     | This parameter is recommended to not be used for downgrading. If you are jailbroken, make sure to have your orig-fs snapshot restored (Restore RootFS). |
+| ` -w `         | ` --wait `                          | Keep rebooting until ApNonce matches APTicket (ApNonce collision, unreliable)                                                                           |
+| ` -d `         | ` --debug `                         | Show all code, use to save a log for debug testing                                                                                                      |
+| ` -e `         | ` --exit-recovery `                 | Exit recovery mode and quit                                                                                                                             |
+| ` -c `         | ` --custom-latest VERSION `         | Specify custom latest version to use for SEP, Baseband and other FirmwareUpdater components                                                             |
+| ` -g `         | ` --custom-latest-buildid BUILDID ` | Specify custom latest buildid to use for SEP, Baseband and other FirmwareUpdater components                                                             |
+| ` -i `         | ` --custom-latest-beta `            | Get custom url from list of beta firmwares                                                                                                              |
+|                | ` --use-pwndfu `                    | Restoring devices with Odysseus method. Device needs to be in pwned DFU mode already                                                                    |
+|                | ` --no-ibss `                       | Restoring devices with Odysseus method. For checkm8/iPwnder32 specifically, bootrom needs to be patched already with unless iPwnder.                    |
+|                | ` --rdsk PATH `                     | Set custom restore ramdisk for entering restoremode(requires use-pwndfu)                                                                                |
+|                | ` --rkrn PATH `                     | Set custom restore kernelcache for entering restoremode(requires use-pwndfu)                                                                            |
+|                | ` --set-nonce `                     | Set custom nonce from your blob then exit recovery(requires use-pwndfu)                                                                                 |
+|                | ` --set-nonce=0xNONCE `             | Set custom nonce then exit recovery(requires use-pwndfu)                                                                                                |
+|                | ` --serial `                        | Enable serial during boot(requires serial cable and use-pwndfu)                                                                                         |
+|                | ` --boot-args "BOOTARGS" `          | Set custom restore boot-args(PROCEED WITH CAUTION)(requires use-pwndfu)                                                                                 |
+|                | ` --no-cache `                      | Disable cached patched iBSS/iBEC(requires use-pwndfu)                                                                                                   |
+|                | ` --skip-blob `                     | Skip SHSH blob validation(PROCEED WITH CAUTION)(requires use-pwndfu)                                                                                    |
+|                | ` --latest-sep `                    | Use latest signed SEP instead of manually specifying one                                                                                                |
+| ` -s `         | ` --sep PATH `                      | Manually specify SEP to be flashed                                                                                                                      |
+| ` -m `         | ` --sep-manifest PATH `             | BuildManifest for requesting SEP ticket                                                                                                                 |
+| ` -j `         | ` --no-rsep `                       | Choose not to send Restore Mode SEP                                                                                                                     |
+|                | ` --latest-baseband `               | Use latest signed baseband instead of manually specifying one                                                                                           |
+| ` -b `         | ` --baseband PATH	`                 | Manually specify baseband to be flashed                                                                                                                 |
+| ` -p `         | ` --baseband-manifest PATH `        | BuildManifest for requesting baseband ticket                                                                                                            |
+|                | ` --no-baseband `                   | Skip checks and don't flash baseband                                                                                                                    |
+|                |                                     | Only use this for device without a baseband (eg. iPod touch or Wi-Fi only iPads)                                                                        |
 
 ---
 

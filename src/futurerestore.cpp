@@ -104,13 +104,19 @@ std::string sepTempPath = futurerestoreTempPath + "/sep.im4p";
 std::string sepManifestTempPath = futurerestoreTempPath + "/sepManifest.plist";
 
 #ifdef __APPLE__
-
+#include <sys/sysctl.h>
 #   include <CommonCrypto/CommonDigest.h>
 
 #   define SHA1(d, n, md) CC_SHA1(d, n, md)
+#   define SHA256(d, n, md) CC_SHA256(d, n, md)
 #   define SHA384(d, n, md) CC_SHA384(d, n, md)
+#   define SHA512(d, n, md) CC_SHA512(d, n, md)
 #else
 #   include <openssl/sha.h>
+extern "C" {
+    unsigned char *SHA1(const unsigned char *d, size_t n, unsigned char *md);
+    unsigned char *SHA256(const unsigned char *d, size_t n, unsigned char *md);
+}
 #endif // __APPLE__
 
 #ifndef HAVE_LIBIPATCHER
@@ -128,10 +134,10 @@ void idevice_event_cb(const idevice_event_t *event, void *userdata);
 #pragma mark futurerestore
 
 futurerestore::futurerestore(bool isUpdateInstall, bool isPwnDfu, bool noIBSS, bool setNonce, bool serial,
-                             bool noRestore) : _isUpdateInstall(isUpdateInstall), _isPwnDfu(isPwnDfu), _noIBSS(noIBSS),
-                                               _setNonce(setNonce), _serial(serial), _noRestore(noRestore) {
+                             bool noRestore, bool noRSEP) : _isUpdateInstall(isUpdateInstall), _isPwnDfu(isPwnDfu), _noIBSS(noIBSS),
+                                               _setNonce(setNonce), _serial(serial), _noRestore(noRestore), _noRSEP(noRSEP) {
     _client = idevicerestore_client_new();
-    retassure(_client != nullptr, "could not create idevicerestore client\n");
+    retassure(_client != nullptr, "Could not create idevicerestore client\n");
 
     struct stat st{0};
     if (stat(futurerestoreTempPath.c_str(), &st) == -1) safe_mkdir(futurerestoreTempPath.c_str(), 0755);
@@ -155,14 +161,15 @@ bool futurerestore::init() {
             info("[INFO] 64-bit device detected\n");
         }
     }
+#ifdef __APPLE__
+    daemonManager(false);
+#endif
     return _didInit;
 }
 
 uint64_t futurerestore::getDeviceEcid() {
     retassure(_didInit, "did not init\n");
-    uint64_t ecid;
-    get_ecid(_client, &ecid);
-    return ecid;
+    return _client->ecid;
 }
 
 int futurerestore::getDeviceMode(bool reRequest) {
@@ -469,7 +476,7 @@ uint64_t futurerestore::getBasebandGoldCertIDFromDevice() {
     plist_t node;
     node = plist_dict_get_item(_client->preflight_info, "CertID");
     if (!node || plist_get_node_type(node) != PLIST_UINT) {
-        error("Unable to find required BbGoldCertId in parameters\n");
+        debug("Unable to find required BbGoldCertId in parameters\n");
         return 0;
     }
     uint64_t val = 0;
@@ -683,7 +690,7 @@ void futurerestore::enterPwnRecovery(plist_t build_identity, std::string bootarg
 
 #if __aarch64__
             retassure(((_client->mode == MODE_UNKNOWN) || (mutex_unlock(&_client->device_event_mutex), 0)),
-                      "Device did not disconnect. Switch to USB-A to lightning cable (see issue #67)");
+                      "Device did not disconnect. Possibly invalid iBEC. If you're using a USB-C to Lightning cable, switch to USB-A to Lightning (see issue #67)");
 #else
             retassure(((_client->mode == MODE_UNKNOWN) || (mutex_unlock(&_client->device_event_mutex), 0)),
                       "Device did not disconnect. Possibly invalid iBEC. Reset device and try again");
@@ -692,7 +699,7 @@ void futurerestore::enterPwnRecovery(plist_t build_identity, std::string bootarg
             cond_wait_timeout(&_client->device_event_cond, &_client->device_event_mutex, 10000);
 #if __aarch64__
             retassure(((_client->mode == MODE_RECOVERY) || (mutex_unlock(&_client->device_event_mutex), 0)),
-                      "Device did not reconnect. Switch to USB-A to lightning cable (see issue #67)");
+                      "Device did not reconnect. Possibly invalid iBEC. If you're using a USB-C to Lightning cable, switch to USB-A to Lightning (see issue #67)");
 #else
             retassure(((_client->mode == MODE_RECOVERY) || (mutex_unlock(&_client->device_event_mutex), 0)),
                       "Device did not reconnect. Possibly invalid iBEC. Reset device and try again");
@@ -709,7 +716,7 @@ void futurerestore::enterPwnRecovery(plist_t build_identity, std::string bootarg
         cond_wait_timeout(&_client->device_event_cond, &_client->device_event_mutex, 10000);
 #if __aarch64__
         retassure(((_client->mode == MODE_RECOVERY) || (mutex_unlock(&_client->device_event_mutex), 0)),
-                  "Device did not reconnect. Switch to USB-A to lightning cable (see issue #67)");
+                  "Device did not reconnect. Possibly invalid iBSS. If you're using a USB-C to Lightning cable, switch to USB-A to Lightning (see issue #67)");
 #else
         retassure(((_client->mode == MODE_RECOVERY) || (mutex_unlock(&_client->device_event_mutex), 0)),
                   "Device did not reconnect. Possibly invalid iBSS. Reset device and try again");
@@ -737,6 +744,10 @@ void futurerestore::enterPwnRecovery(plist_t build_identity, std::string bootarg
         auto nonceelem = img4tool::getValFromIM4M({_im4ms[0].first, _im4ms[0].second}, 'BNCH');
 
         info("ApNonce pre-hax:\n");
+        getDeviceMode(true);
+        retassure(((recovery_client_new(_client) == IRECV_E_SUCCESS) ||
+                   (mutex_unlock(&_client->device_event_mutex), 0)),
+                  "Failed to connect to device in Recovery Mode!");
         if (get_ap_nonce(_client, &_client->nonce, &_client->nonce_size) < 0) {
             reterror("Failed to get apnonce from device!");
         }
@@ -890,6 +901,7 @@ void futurerestore::doRestore(const char *ipsw) {
 
     client->ipsw = strdup(ipsw);
     if (_noRestore) client->flags |= FLAG_NO_RESTORE;
+    if (_noRSEP) client->flags |= FLAG_NO_RSEP;
     if (!_isUpdateInstall) client->flags |= FLAG_ERASE;
 
     irecv_device_event_subscribe(&client->irecv_e_ctx, irecv_event_cb, client);
@@ -921,6 +933,7 @@ void futurerestore::doRestore(const char *ipsw) {
         retassure(!ipsw_extract_build_manifest(client->ipsw, &buildmanifest, &unused),
                   "ERROR: Unable to extract BuildManifest from %s. Firmware file might be corrupt.\n", client->ipsw);
     }
+    client->build_manifest = plist_copy(buildmanifest);
 
     /* check if device type is supported by the given build manifest */
     retassure(!build_manifest_check_compatibility(buildmanifest, client->device->product_type),
@@ -1121,13 +1134,13 @@ void futurerestore::doRestore(const char *ipsw) {
         if (sephashlen == 20)
             SHA1((unsigned char *) _client->sepfwdata, (unsigned int) _client->sepfwdatasize, genHash);
         else
-            SHA384((unsigned char *) _client->sepfwdata, (unsigned int) _client->sepfwdatasize, genHash);
+            SHA384((const unsigned char *) _client->sepfwdata, (unsigned long) _client->sepfwdatasize, genHash);
         retassure(!memcmp(genHash, sephash, sephashlen), "ERROR: SEP does not match sepmanifest\n");
     }
 
     build_identity_print_information(build_identity); // print information about current build identity
 
-    //check for enterpwnrecovery, because we could be in DFU mode
+    //check for enterpwnrecovery, because we Could be in DFU mode
     if (_enterPwnRecoveryRequested) {
         retassure((getDeviceMode(true) == _MODE_DFU) || (getDeviceMode(false) == _MODE_RECOVERY && _noIBSS),
                   "unexpected device mode\n");
@@ -1327,7 +1340,7 @@ void futurerestore::doRestore(const char *ipsw) {
         cond_wait_timeout(&client->device_event_cond, &client->device_event_mutex, 10000);
 #if __aarch64__
         retassure((client->mode == MODE_UNKNOWN || (mutex_unlock(&client->device_event_mutex), 0)),
-                  "Device did not disconnect. Switch to USB-A to lightning cable (see issue #67)");
+                  "Device did not disconnect. Possibly invalid iBEC. If you're using a USB-C to Lightning cable, switch to USB-A to Lightning (see issue #67)");
 #else
         retassure((client->mode == MODE_UNKNOWN || (mutex_unlock(&client->device_event_mutex), 0)),
                   "Device did not disconnect. Possibly invalid iBEC. Reset device and try again");  
@@ -1339,7 +1352,7 @@ void futurerestore::doRestore(const char *ipsw) {
         cond_wait_timeout(&client->device_event_cond, &client->device_event_mutex, 10000);
 #if __aarch64__
         retassure((client->mode == MODE_RECOVERY || (mutex_unlock(&client->device_event_mutex), 0)),
-                  "Device did not disconnect. Switch to USB-A to lightning cable (see issue #67)");
+                  "Device did not disconnect. Possibly invalid iBEC. If you're using a USB-C to Lightning cable, switch to USB-A to Lightning (see issue #67)");
 #else
         retassure((client->mode == MODE_RECOVERY || (mutex_unlock(&client->device_event_mutex), 0)),
                   "Device did not disconnect. Possibly invalid iBEC. Reset device and try again");    
@@ -1352,10 +1365,9 @@ void futurerestore::doRestore(const char *ipsw) {
     //do magic
     if (_client->image4supported) get_sep_nonce(client, &client->sepnonce, &client->sepnonce_size);
     get_ap_nonce(client, &client->nonce, &client->nonce_size);
-    get_ecid(client, &client->ecid);
 
     if (client->mode == MODE_RECOVERY) {
-        retassure(client->srnm, "ERROR: could not retrieve device serial number. Can't continue.\n");
+        retassure(client->srnm, "ERROR: Could not retrieve device serial number. Can't continue.\n");
 
         if (client->device->chip_id < 0x8015) {
             retassure(!irecv_send_command(client->recovery->client, "bgcolor 0 255 0"),
@@ -1389,6 +1401,130 @@ void futurerestore::doRestore(const char *ipsw) {
     else retassure(!(result), "ERROR: Unable to restore device\n");
 }
 
+#ifdef __APPLE__
+// Borrowed from apple killall.c
+int futurerestore::findProc(const char *procName, bool load) {
+    struct kinfo_proc *procs = nullptr, *procs2 = nullptr;
+    int mib[4];
+    size_t mibLen, size = 0;
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_PROC;
+    mib[2] = KERN_PROC_ALL;
+    mib[3] = 0;
+    mibLen = 3;
+    int ctlRet = 0;
+    do {
+        ctlRet = sysctl(mib, mibLen, nullptr, &size, nullptr, 0);
+        if (ctlRet < 0) {
+            debug("daemonManager: findProc: failed sysctl(KERN_PROC)!\n");
+            return -1;
+        }
+        if (!size) {
+            debug("daemonManager: findProc: failed sysctl(KERN_PROC) size!\n");
+            return -1;
+        }
+        size += size / 10;
+        procs2 = static_cast<kinfo_proc *>(realloc(procs, size));
+        if (!procs2) {
+            debug("daemonManager: findProc: realloc failed!\n");
+            safeFree(procs);
+            safeFree(procs2);
+            return -1;
+        }
+        procs = procs2;
+        ctlRet = sysctl(mib, mibLen, procs, &size, nullptr, 0);
+    } while(ctlRet < 0 && errno == ENOMEM);
+    int nprocs = size / sizeof(struct kinfo_proc);
+    int pid = 0;
+    char *cmd;
+    for(int i = 0; i < nprocs; i++) {
+        if (procs[i].kp_proc.p_stat == SZOMB) {
+            continue;
+        }
+        pid = procs[i].kp_proc.p_pid;
+        char *procArgs = nullptr, *foundProc = nullptr;
+        int mib2[3], argMax;
+        size_t sysSize;
+        mib2[0] = CTL_KERN;
+        mib2[1] = KERN_ARGMAX;
+        sysSize = sizeof(argMax);
+        if (sysctl(mib2, 2, &argMax, &sysSize, nullptr, 0) == -1) {
+            continue;
+        }
+        procArgs = static_cast<char *>(malloc(argMax));
+        if (procArgs == nullptr) {
+            continue;
+        }
+        mib2[0] = CTL_KERN;
+        mib2[1] = KERN_PROCARGS2;
+        mib2[2] = pid;
+        sysSize = (size_t)argMax;
+        if (sysctl(mib2, 3, procArgs, &sysSize, nullptr, 0) == -1) {
+            safeFree(procArgs);
+            continue;
+        }
+        for (foundProc = procArgs; foundProc < &procArgs[sysSize]; foundProc++) {
+            if (*foundProc == '\0') {
+                break;
+            }
+        }
+
+        if (foundProc == &procArgs[sysSize]) {
+            free(procArgs);
+            continue;
+        }
+
+        for (; foundProc < &procArgs[sysSize]; foundProc++) {
+            if (*foundProc != '\0') {
+                break;
+            }
+        }
+
+        if (foundProc == &procArgs[sysSize]) {
+            free(procArgs);
+            continue;
+        }
+
+        /* Strip off any path that was specified */
+        for(cmd = foundProc; (foundProc < &procArgs[sysSize]) && (*foundProc != '\0'); foundProc++) {
+            if (*foundProc == '/') {
+                cmd = foundProc + 1;
+            }
+        }
+        if (strcmp(cmd, procName) == 0) {
+            if(!load) {
+                debug("daemonManager: findProc: found %s!\n", procName);
+            }
+            return pid;
+        }
+    }
+    return -1;
+}
+
+void futurerestore::daemonManager(bool load) {
+    if(!load) {
+        debug("daemonManager: suspending invasive macOS daemons...\n");
+    }
+    int pid = 0;
+    const char *procList[] = { "MobileDeviceUpdater", "AMPDevicesAgent", "AMPDeviceDiscoveryAgent", 0};
+    for(int i = 0; i < 3; i++) {
+        pid = findProc(procList[i], load);
+        if (pid > 1) {
+            if (load) {
+                int ret = kill(pid, SIGCONT);
+            } else {
+                debug("daemonManager: killing %s.\n", procList[i]);
+                int ret = kill(pid, SIGSTOP);
+            }
+        }
+    }
+
+    if(!load) {
+        debug("daemonManager: done!\n");
+    }
+}
+#endif
+
 futurerestore::~futurerestore() {
     recovery_client_free(_client);
     idevicerestore_client_free(_client);
@@ -1407,24 +1543,30 @@ futurerestore::~futurerestore() {
     }
     safeFreeCustom(_sepbuildmanifest, plist_free);
     safeFreeCustom(_basebandbuildmanifest, plist_free);
+#ifdef __APPLE__
+    daemonManager(true);
+#endif
 }
 
 void futurerestore::loadFirmwareTokens() {
     if (!_firmwareTokens) {
         if (!_firmwareJson) _firmwareJson = getFirmwareJson();
-        retassure(_firmwareJson, "[TSSC] could not get firmware.json\n");
+        retassure(_firmwareJson, "[TSSC] Could not get firmware.json\n");
         long cnt = parseTokens(_firmwareJson, &_firmwareTokens);
         retassure(cnt > 0, "[TSSC] parsing %s.json failed\n", (0) ? "ota" : "firmware");
     }
     if(!_betaFirmwareTokens) {
         if (!_betaFirmwareJson) _betaFirmwareJson = getBetaFirmwareJson(getDeviceModelNoCopy());
-        retassure(_betaFirmwareJson, "[TSSC] could not get betas json\n");
+        retassure(_betaFirmwareJson, "[TSSC] Could not get betas json\n");
         long cnt = parseTokens(_betaFirmwareJson, &_betaFirmwareTokens);
         retassure(cnt > 0, "[TSSC] parsing %s.json failed\n", (0) ? "beta ota" : "beta firmware");
     }
 }
 
 const char *futurerestore::getDeviceModelNoCopy() {
+    if(_model) {
+        return _model;
+    }
     if (!_client->device || !_client->device->product_type) {
 
         int mode = getDeviceMode(true);
@@ -1447,10 +1589,13 @@ const char *futurerestore::getDeviceModelNoCopy() {
         }
     }
 
-    return _client->device->product_type;
+    return _model = _client->device->product_type;
 }
 
 const char *futurerestore::getDeviceBoardNoCopy() {
+    if(_board) {
+        return _board;
+    }
     if (!_client->device || !_client->device->product_type) {
 
         int mode = getDeviceMode(true);
@@ -1472,7 +1617,7 @@ const char *futurerestore::getDeviceBoardNoCopy() {
                 break;
         }
     }
-    return _client->device->hardware_model;
+    return _board = _client->device->hardware_model;
 }
 
 char *futurerestore::getLatestManifest() {
@@ -1496,7 +1641,7 @@ char *futurerestore::getLatestManifest() {
         while ((bpos = strstr((char *) (versVals.version = strdup(versions[i++])), "[B]")) != nullptr) {
             free((char *) versVals.version);
             if (--versionCnt == 0)
-                reterror("[TSSC] automatic selection of firmware couldn't find for non-beta versions\n");
+                reterror("[TSSC] automatic selection of firmware Couldn't find for non-beta versions\n");
         }
         if(_useCustomLatest) {
             i = 0;
@@ -1531,9 +1676,9 @@ char *futurerestore::getLatestManifest() {
         }
         if(!_useCustomLatestBeta) {
             if(_useCustomLatestBuildID) {
-                info("[TSSC] selecting latest firmware version: %s\n", versVals.buildID);
+                debug("[TSSC] selecting latest firmware version: %s\n", versVals.buildID);
             } else {
-                info("[TSSC] selecting latest firmware version: %s\n", versVals.version);
+                debug("[TSSC] selecting latest firmware version: %s\n", versVals.version);
             }
         }
         if (bpos) *bpos = '\0';
@@ -1545,7 +1690,7 @@ char *futurerestore::getLatestManifest() {
                 versVals.buildID); //make sure it gets freed after function finishes execution by either reaching end or throwing exception
 
         if(_useCustomLatestBeta) {
-            info("[TSSC] selecting latest firmware version: %s\n", _customLatestBuildID.c_str());
+            debug("[TSSC] selecting latest firmware version: %s\n", _customLatestBuildID.c_str());
             _latestFirmwareUrl = getBetaURLForDevice(_betaFirmwareTokens, _customLatestBuildID.c_str());
             _latestManifest = getBuildManifest(_latestFirmwareUrl, device, nullptr, _customLatestBuildID.c_str(), 0);
         } else {
@@ -1556,8 +1701,8 @@ char *futurerestore::getLatestManifest() {
                 _latestManifest = getBuildManifest(_latestFirmwareUrl, device, versVals.version, versVals.buildID, 0);
             }
         }
-        retassure(_latestFirmwareUrl, "could not find url of latest firmware version\n");
-        retassure(_latestManifest, "could not get buildmanifest of latest firmware version\n");
+        retassure(_latestFirmwareUrl, "Could not find url of latest firmware version\n");
+        retassure(_latestManifest, "Could not get buildmanifest of latest firmware version\n");
     }
 
     return _latestManifest;
@@ -1572,9 +1717,20 @@ void futurerestore::downloadLatestRose() {
     char *roseStr = (elemExists("Rap,RTKitOS", manifeststr, getDeviceBoardNoCopy(), 0) ? getPathOfElementInManifest(
             "Rap,RTKitOS", manifeststr, getDeviceBoardNoCopy(), 0) : nullptr);
     if (roseStr) {
-        info("downloading Rose firmware\n\n");
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), roseStr, roseTempPath.c_str()),
-                  "could not download Rose\n");
+        auto *digestString = getDigestOfElementInManifest("Rap,RTKitOS", manifeststr, getDeviceBoardNoCopy(), 0);
+        unsigned char *hash = getSHA(roseTempPath);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 48)) {
+                info("Using cached Rose\n");
+                safeFree(digestString);
+                safeFree(hash);
+                return;
+            }
+        } else {
+            info("Downloading Rose firmware\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), roseStr, roseTempPath.c_str()),
+                      "Could not download Rose\n");
+        }
         loadRose(roseTempPath);
     }
 }
@@ -1584,8 +1740,10 @@ void futurerestore::downloadLatestSE() {
     char *seStr = (elemExists("SE,UpdatePayload", manifeststr, getDeviceBoardNoCopy(), 0) ? getPathOfElementInManifest(
             "SE,UpdatePayload", manifeststr, getDeviceBoardNoCopy(), 0) : nullptr);
     if (seStr) {
-        info("downloading SE firmware\n\n");
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), seStr, seTempPath.c_str()), "could not download SE\n");
+        // TODO: SE caching how does ProductionUpdatePayloadHash work?
+        info("Downloading SE firmware\n\n");
+        retassure(!downloadPartialzip(getLatestFirmwareUrl(), seStr, seTempPath.c_str()),
+                  "Could not download SE\n");
         loadSE(seTempPath);
     }
 }
@@ -1612,41 +1770,102 @@ void futurerestore::downloadLatestSavage() {
                             : nullptr);
     std::array<std::string, 6> savagePaths{};
 
+
     if (savageB0ProdStr) {
-        info("downloading Savage,B0-Prod-Patch\n\n");
         savagePaths[0] = futurerestoreTempPath + "/savageB0PP.fw";
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageB0ProdStr, savagePaths[0].c_str()),
-                  "could not download Savage,B0-Prod-Patch\n");
+        auto *digestString = getDigestOfElementInManifest("Savage,B0-Prod-Patch", manifeststr, getDeviceBoardNoCopy(), 0);
+        unsigned char *hash = getSHA(savagePaths[0], 1);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 32)) {
+                info("Using cached Savage,B0-Prod-Patch.\n");
+                safeFree(digestString);
+                safeFree(hash);
+            }
+        } else {
+            info("Downloading Savage,B0-Prod-Patch\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageB0ProdStr, savagePaths[0].c_str()),
+                      "Could not download Savage,B0-Prod-Patch\n");
+        }
     }
     if (savageB0DevStr) {
-        info("downloading Savage,B0-Dev-Patch\n\n");
         savagePaths[1] = futurerestoreTempPath + "//savageB0DP.fw";
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageB0DevStr, savagePaths[1].c_str()),
-                  "could not download Savage,B0-Dev-Patch\n");
+        auto *digestString = getDigestOfElementInManifest("Savage,B0-Dev-Patch", manifeststr, getDeviceBoardNoCopy(), 0);
+        unsigned char *hash = getSHA(savagePaths[1], 1);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 32)) {
+                info("Using cached Savage,B0-Dev-Patch.\n");
+                safeFree(digestString);
+                safeFree(hash);
+            }
+        } else {
+            info("Downloading Savage,B0-Dev-Patch\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageB0DevStr, savagePaths[1].c_str()),
+                      "Could not download Savage,B0-Dev-Patch\n");
+        }
     }
     if (savageB2ProdStr) {
-        info("downloading Savage,B2-Prod-Patch\n\n");
         savagePaths[2] = futurerestoreTempPath + "//savageB2PP.fw";
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageB2ProdStr, savagePaths[2].c_str()),
-                  "could not download Savage,B2-Prod-Patch\n");
+        auto *digestString = getDigestOfElementInManifest("Savage,B2-Prod-Patch", manifeststr, getDeviceBoardNoCopy(), 0);
+        unsigned char *hash = getSHA(savagePaths[2], 1);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 32)) {
+                info("Using cached Savage,B2-Prod-Patch.\n");
+                safeFree(digestString);
+                safeFree(hash);
+            }
+        } else {
+            info("Downloading Savage,B2-Prod-Patch\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageB2ProdStr, savagePaths[2].c_str()),
+                      "Could not download Savage,B2-Prod-Patch\n");
+        }
     }
     if (savageB2DevStr) {
-        info("downloading Savage,B2-Dev-Patch\n\n");
         savagePaths[3] = futurerestoreTempPath + "//savageB2DP.fw";
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageB2DevStr, savagePaths[3].c_str()),
-                  "could not download Savage,B2-Dev-Patch\n");
+        auto *digestString = getDigestOfElementInManifest("Savage,B2-Dev-Patch", manifeststr, getDeviceBoardNoCopy(), 0);
+        unsigned char *hash = getSHA(savagePaths[3], 1);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 32)) {
+                info("Using cached Savage,B2-Dev-Patch.\n");
+                safeFree(digestString);
+                safeFree(hash);
+            }
+        } else {
+            info("Downloading Savage,B2-Dev-Patch\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageB2DevStr, savagePaths[3].c_str()),
+                      "Could not download Savage,B2-Dev-Patch\n");
+        }
     }
     if (savageBAProdStr) {
-        info("downloading Savage,BA-Prod-Patch\n\n");
         savagePaths[4] = futurerestoreTempPath + "//savageBAPP.fw";
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageBAProdStr, savagePaths[4].c_str()),
-                  "could not download Savage,BA-Prod-Patch\n");
+        auto *digestString = getDigestOfElementInManifest("Savage,BA-Prod-Patch", manifeststr, getDeviceBoardNoCopy(), 0);
+        unsigned char *hash = getSHA(savagePaths[4], 1);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 32)) {
+                info("Using cached Savage,BA-Prod-Patch.\n");
+                safeFree(digestString);
+                safeFree(hash);
+            }
+        } else {
+            info("Downloading Savage,BA-Prod-Patch\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageBAProdStr, savagePaths[4].c_str()),
+                      "Could not download Savage,BA-Prod-Patch\n");
+        }
     }
     if (savageBADevStr) {
-        info("downloading Savage,BA-Dev-Patch\n\n");
         savagePaths[5] = futurerestoreTempPath + "//savageBADP.fw";
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageBADevStr, savagePaths[5].c_str()),
-                  "could not download Savage,BA-Dev-Patch\n");
+        auto *digestString = getDigestOfElementInManifest("Savage,BA-Dev-Patch", manifeststr, getDeviceBoardNoCopy(), 0);
+        unsigned char *hash = getSHA(savagePaths[5], 1);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 32)) {
+                info("Using cached Savage,BA-Dev-Patch.\n");
+                safeFree(digestString);
+                safeFree(hash);
+            }
+        } else {
+            info("Downloading Savage,BA-Dev-Patch\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), savageBADevStr, savagePaths[5].c_str()),
+                      "Could not download Savage,BA-Dev-Patch\n");
+        }
     }
     if (savageB0ProdStr &&
         savageB0DevStr &&
@@ -1666,15 +1885,36 @@ void futurerestore::downloadLatestVeridian() {
     char *veridianFWMStr = (elemExists("BMU,FirmwareMap", manifeststr, getDeviceBoardNoCopy(), 0)
                             ? getPathOfElementInManifest("BMU,FirmwareMap", manifeststr, getDeviceBoardNoCopy(), 0)
                             : nullptr);
+
     if (veridianDGMStr) {
-        info("downloading Veridian DigestMap\n\n");
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), veridianDGMStr, veridianDGMTempPath.c_str()),
-                  "could not download Veridian DigestMap\n");
+        auto *digestString = getDigestOfElementInManifest("BMU,DigestMap", manifeststr, getDeviceBoardNoCopy(), 0);
+        unsigned char *hash = getSHA(veridianDGMTempPath);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 48)) {
+                info("Using cached BMU,DigestMap(Veridian).\n");
+                safeFree(digestString);
+                safeFree(hash);
+            }
+        } else {
+            info("Downloading Veridian DigestMap\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), veridianDGMStr, veridianDGMTempPath.c_str()),
+                      "Could not download Veridian DigestMap\n");
+        }
     }
     if (veridianFWMStr) {
-        info("downloading Veridian FirmwareMap\n\n");
-        retassure(!downloadPartialzip(getLatestFirmwareUrl(), veridianFWMStr, veridianFWMTempPath.c_str()),
-                  "could not download Veridian FirmwareMap\n");
+        auto digestString = getDigestOfElementInManifest("BMU,FirmwareMap", manifeststr, getDeviceBoardNoCopy(), 0);
+        auto hash = getSHA(veridianFWMTempPath);
+        if(hash && digestString) {
+            if(!memcmp(digestString, hash, 48)) {
+                info("Using cached BMU,FirmwareMap(Veridian).\n");
+                safeFree(digestString);
+                safeFree(hash);
+            }
+        } else {
+            info("Downloading Veridian FirmwareMap\n\n");
+            retassure(!downloadPartialzip(getLatestFirmwareUrl(), veridianFWMStr, veridianFWMTempPath.c_str()),
+                      "Could not download Veridian FirmwareMap\n");
+        }
     }
     if (veridianDGMStr && veridianFWMStr)
         loadVeridian(veridianDGMTempPath, veridianFWMTempPath);
@@ -1702,11 +1942,12 @@ void futurerestore::downloadLatestFirmwareComponents() {
 }
 
 void futurerestore::downloadLatestBaseband() {
-    char *manifeststr = getLatestManifest();
-    char *pathStr = getPathOfElementInManifest("BasebandFirmware", manifeststr, getDeviceBoardNoCopy(), 0);
-    info("downloading Baseband\n\n");
+    auto manifeststr = getLatestManifest();
+    auto pathStr = getPathOfElementInManifest("BasebandFirmware", manifeststr, getDeviceBoardNoCopy(), 0);
+    // TODO: Baseband caching. How on earth does basebandfirmware digest work?
+    info("Downloading Baseband\n\n");
     retassure(!downloadPartialzip(getLatestFirmwareUrl(), pathStr, basebandTempPath.c_str()),
-              "could not download baseband\n");
+              "Could not download baseband\n");
     saveStringToFile(manifeststr, basebandManifestTempPath);
     setBasebandPath(basebandTempPath);
     setBasebandManifestPath(basebandManifestTempPath);
@@ -1715,10 +1956,20 @@ void futurerestore::downloadLatestBaseband() {
 }
 
 void futurerestore::downloadLatestSep() {
-    std::string manifestString = getLatestManifest();
-    std::string pathString = getPathOfElementInManifest("SEP", manifestString.c_str(), getDeviceBoardNoCopy(), 0);
-    info("downloading SEP\n\n");
-    retassure(!downloadPartialzip(getLatestFirmwareUrl(), pathString.c_str(), sepTempPath.c_str()), "could not download SEP\n");
+    auto manifestString = getLatestManifest();
+    auto pathString = getPathOfElementInManifest("SEP", manifestString, getDeviceBoardNoCopy(), 0);
+    auto *digestString = getDigestOfElementInManifest("SEP",manifestString,getDeviceBoardNoCopy(),0);
+    auto *hash = getSHA(sepTempPath);
+    if(hash && digestString) {
+        if(!memcmp(digestString, hash, 48)) {
+            info("Using cached SEP.\n");
+            safeFree(digestString);
+            safeFree(hash);
+        }
+    } else {
+        info("Downloading SEP\n\n");
+        retassure(!downloadPartialzip(getLatestFirmwareUrl(), pathString, sepTempPath.c_str()), "Could not download SEP\n");
+    }
     saveStringToFile(manifestString, sepManifestTempPath);
     setSepPath(sepTempPath);
     setSepManifestPath(sepManifestTempPath);
@@ -1729,13 +1980,13 @@ void futurerestore::downloadLatestSep() {
 void futurerestore::loadSepManifest(std::string sepManifestPath) {
     this->_sepManifestPath = sepManifestPath;
     retassure(_sepbuildmanifest = loadPlistFromFile(sepManifestPath.c_str()),
-              "failed to load SEP Manifest");
+              "Failed to load SEP Manifest");
 }
 
 void futurerestore::loadBasebandManifest(std::string basebandManifestPath) {
     this->_basebandManifestPath = basebandManifestPath;
     retassure(_basebandbuildmanifest = loadPlistFromFile(basebandManifestPath.c_str()),
-              "failed to load Baseband Manifest");
+              "Failed to load Baseband Manifest");
 };
 
 void futurerestore::loadRose(std::string rosePath) {
@@ -1880,6 +2131,54 @@ void futurerestore::loadBaseband(std::string basebandPath) {
               __func__, basebandPath.c_str());
 }
 
+unsigned char *futurerestore::getSHA(const std::string& filePath, int type) {
+    std::ifstream fileStream(filePath);
+    if(!fileStream.good()) {
+        info("Cached %s not found, downloading a new one.\n", filePath.c_str());
+        return nullptr;
+    }
+    fileStream.seekg(0, std::ios_base::end);
+    size_t dataSize = fileStream.tellg();
+    fileStream.seekg(0, std::ios_base::beg);
+    std::allocator<uint8_t> alloc;
+    char *data = nullptr;
+    if(!(data = (char *)alloc.allocate(dataSize))) {
+        error("%s: failed to allocate memory for %s\n", __func__, filePath.c_str());
+        return nullptr;
+    }
+    fileStream.read((char *) data,
+                       (std::streamsize) dataSize);
+    if(*(uint64_t *)(data) == 0) {
+        error("%s: failed to load File for %s with the size %zu!\n",
+              __func__, filePath.c_str(), dataSize);
+        return nullptr;
+    }
+    auto *fileHash = (unsigned char *)nullptr;
+    switch(type) {
+        case 0:
+            fileHash = (unsigned char *) alloc.allocate(48);
+            SHA384((const unsigned char*)data, (unsigned int)dataSize, fileHash);
+            break;
+        case 1:
+            fileHash = (unsigned char *) alloc.allocate(32);
+            SHA256((const unsigned char*)data, (unsigned int)dataSize, fileHash);
+            break;
+        case 2:
+            fileHash = (unsigned char *) alloc.allocate(64);
+            SHA512((const unsigned char*)data, (unsigned int)dataSize, fileHash);
+            break;
+        case 3:
+            fileHash = (unsigned char *) alloc.allocate(20);
+            SHA1((const unsigned char*)data, (unsigned int)dataSize, fileHash);
+            break;
+        default:
+            fileHash = (unsigned char *) alloc.allocate(48);
+            SHA384((const unsigned char*)data, (unsigned int)dataSize, fileHash);
+            break;
+    }
+    return fileHash;
+}
+
 #pragma mark static methods
 
 inline void futurerestore::saveStringToFile(std::string str, std::string path) {
@@ -1970,7 +2269,7 @@ plist_t futurerestore::loadPlistFromFile(const char *path) {
 
     FILE *f = fopen(path, "rb");
     if (!f) {
-        error("could not open file %s\n", path);
+        error("Could not open file %s\n", path);
         return nullptr;
     }
     fseek(f, 0, SEEK_END);
@@ -2014,9 +2313,29 @@ char *futurerestore::getPathOfElementInManifest(const char *element, const char 
                         if (plist_get_string_val(path, &pathStr), pathStr)
                             goto noerror;
 
-    reterror("could not get %s path\n", element);
+    reterror("Could not get %s path\n", element);
     noerror:
     return pathStr;
+}
+
+unsigned char *futurerestore::getDigestOfElementInManifest(const char *element, const char *manifeststr, const char *boardConfig,
+                                                int isUpdateInstall) {
+    char *digestStr = nullptr;
+    ptr_smart<plist_t> buildmanifest(NULL, plist_free);
+    uint64_t size;
+
+    plist_from_xml(manifeststr, (uint32_t) strlen(manifeststr), &buildmanifest);
+
+    if (plist_t identity = getBuildidentityWithBoardconfig(buildmanifest._p, boardConfig, isUpdateInstall))
+        if (plist_t manifest = plist_dict_get_item(identity, "Manifest"))
+            if (plist_t elem = plist_dict_get_item(manifest, element))
+                if (plist_t path = plist_dict_get_item(elem, "Digest"))
+                    if (plist_get_data_val(path, &digestStr, &size), digestStr)
+                        goto noerror;
+
+    return nullptr;
+    noerror:
+    return (unsigned char *)digestStr;
 }
 
 bool
