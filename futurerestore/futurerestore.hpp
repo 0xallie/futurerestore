@@ -107,7 +107,7 @@ public:
     void exitRecovery();
     void waitForNonce();
     void waitForNonce(vector<const char *>nonces, size_t nonceSize);
-    void loadAPTickets(const vector<const char *> &apticketPaths);
+    void loadAPTickets(const vector<const char *> &apticketPaths, bool extra);
     char *getiBootBuild();
     
     plist_t nonceMatchesApTickets();

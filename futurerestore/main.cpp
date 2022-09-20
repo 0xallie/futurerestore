@@ -33,8 +33,10 @@ static struct option longopts[] = {
         { "apticket",                   required_argument,      nullptr, 't' },
         { "baseband",                   required_argument,      nullptr, 'b' },
         { "baseband-manifest",          required_argument,      nullptr, 'p' },
+        //{ "baseband-ticket",            required_argument,      nullptr, 'B' },
         { "sep",                        required_argument,      nullptr, 's' },
         { "sep-manifest",               required_argument,      nullptr, 'm' },
+        { "sep-ticket",                 required_argument,      nullptr, 'S' },
         { "wait",                       no_argument,            nullptr, 'w' },
         { "update",                     no_argument,            nullptr, 'u' },
         { "debug",                      no_argument,            nullptr, 'd' },
@@ -114,11 +116,13 @@ void cmd_help(){
     printf("      --latest-sep\t\t\tUse latest signed SEP instead of manually specifying one\n");
     printf("  -s, --sep PATH\t\t\tSEP to be flashed\n");
     printf("  -m, --sep-manifest PATH\t\tBuildManifest for requesting SEP ticket\n");
+    printf("  -S, --sep-ticket PATH\t\t\tSpecify custom SEP ticket instead of requesting one\n");
 
     printf("\nOptions for baseband:\n");
     printf("      --latest-baseband\t\t\tUse latest signed baseband instead of manually specifying one\n");
     printf("  -b, --baseband PATH\t\t\tBaseband to be flashed\n");
     printf("  -p, --baseband-manifest PATH\t\tBuildManifest for requesting baseband ticket\n");
+    //printf("  -B, --baseband-ticket PATH\t\tSpecify custom baseband ticket instead of requesting one\n");
     printf("      --no-baseband\t\t\tSkip checks and don't flash baseband\n");
     printf("                   \t\t\tOnly use this for device without a baseband (eg. iPod touch or some Wi-Fi only iPads)\n\n");
 }
@@ -161,6 +165,8 @@ int main_r(int argc, const char * argv[]) {
     const char *custom_nonce = nullptr;
 
     vector<const char*> apticketPaths;
+    vector<const char*> septicketPaths;
+    //vector<const char*> bbticketPaths;
 
     t_devicevals devVals = {nullptr};
     t_iosVersion versVals = {nullptr};
@@ -185,11 +191,17 @@ int main_r(int argc, const char * argv[]) {
             case 'p': // long option: "baseband-manifest"; can be called as short option
                 basebandManifestPath = optarg;
                 break;
+            //case 'B': // long option: "baseband-ticket"; can be called as short option
+            //    bbticketPaths.push_back(optarg);
+            //    break;
             case 's': // long option: "sep"; can be called as short option
                 sepPath = optarg;
                 break;
             case 'm': // long option: "sep-manifest"; can be called as short option
                 sepManifestPath = optarg;
+                break;
+            case 'S': // long option: "sep-ticket"; can be called as short option
+                septicketPaths.push_back(optarg);
                 break;
             case 'w': // long option: "wait"; can be called as short option
                 flags |= FLAG_WAIT;
@@ -328,8 +340,16 @@ int main_r(int argc, const char * argv[]) {
 
     try {
         if (!apticketPaths.empty()) {
-            client.loadAPTickets(apticketPaths);
+            client.loadAPTickets(apticketPaths, false);
         }
+
+        if (!septicketPaths.empty()) {
+            client.loadAPTickets(septicketPaths, true);
+        }
+
+        //if (!bbticketPaths.empty()) {
+        //    client.loadAPTickets(bbticketPaths, true);
+        //}
 
         if(!customLatest.empty()) {
             client.setCustomLatest(customLatest);
@@ -397,9 +417,9 @@ int main_r(int argc, const char * argv[]) {
         }
 
         versVals.basebandMode = kBasebandModeWithoutBaseband;
-        if (!client.is32bit() && !(isManifestSignedForDevice(client.getSepManifestPath().c_str(), &devVals, &versVals, nullptr))){
-            reterror("SEP firmware is NOT being signed!\n");
-        }
+        //if (!client.is32bit() && !(isManifestSignedForDevice(client.getSepManifestPath().c_str(), &devVals, &versVals, nullptr))){
+        //    reterror("SEP firmware is NOT being signed!\n");
+        //}
         if (flags & FLAG_NO_BASEBAND){
             printf("\nWARNING: user specified is not to flash a baseband. This can make the restore fail if the device needs a baseband!\n");
             printf("if you added this flag by mistake, you can press CTRL-C now to cancel\n");

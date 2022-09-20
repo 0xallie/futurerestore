@@ -390,7 +390,7 @@ void futurerestore::waitForNonce() {
     waitForNonce(nonces, nonceSize);
 }
 
-void futurerestore::loadAPTickets(const vector<const char *> &apticketPaths) {
+void futurerestore::loadAPTickets(const vector<const char *> &apticketPaths, bool extra) {
     for (auto apticketPath: apticketPaths) {
         plist_t apticket = nullptr;
         char *im4m = nullptr;
@@ -451,7 +451,9 @@ void futurerestore::loadAPTickets(const vector<const char *> &apticketPaths) {
 
         retassure(im4msize, "Error: failed to load signing ticket file %s\n", apticketPath);
 
-        _im4ms.emplace_back(im4m, im4msize);
+        if (!extra) {
+            _im4ms.emplace_back(im4m, im4msize);
+        }
         _aptickets.push_back(apticket);
         printf("reading signing ticket %s is done\n", apticketPath);
     }
@@ -935,6 +937,12 @@ void futurerestore::doRestore(const char *ipsw) {
         client->tss = _aptickets.at(0);
     else if (!(client->tss = nonceMatchesApTickets()))
         reterror("Device ApNonce does not match APTicket nonce\n");
+    if (_aptickets.size() > 1) {
+        client->septss = _aptickets.at(1);
+    }
+    //if (_aptickets.size() > 2) {
+    //    client->restore->bbtss = _aptickets.at(2);
+    //}
 
     plist_dict_remove_item(client->tss, "BBTicket");
     plist_dict_remove_item(client->tss, "BasebandFirmware");
@@ -1363,8 +1371,8 @@ void futurerestore::doRestore(const char *ipsw) {
 
     if (_client->image4supported) {
         info("getting SEP ticket\n");
-        retassure(!get_tss_response(client, client->sepBuildIdentity, &client->septss),
-                  "ERROR: Unable to get signing tickets for SEP\n");
+        //retassure(!get_tss_response(client, client->sepBuildIdentity, &client->septss),
+        //          "ERROR: Unable to get signing tickets for SEP\n");
         retassure(_client->sepfwdatasize && _client->sepfwdata, "SEP is not loaded, refusing to continue");
     }
 
