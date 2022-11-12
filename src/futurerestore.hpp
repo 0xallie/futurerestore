@@ -30,14 +30,12 @@
 #include <jssy.h>
 #include <plist/plist.h>
 
-using namespace std;
-
 template <typename T>
 class ptr_smart {
     std::function<void(T)> _ptr_free = NULL;
 public:
     T _p;
-    ptr_smart(T p, function<void(T)> ptr_free){static_assert(is_pointer<T>(), "error: this is for pointers only\n"); _p = p;_ptr_free = ptr_free;}
+    ptr_smart(T p, std::function<void(T)> ptr_free){static_assert(std::is_pointer<T>(), "error: this is for pointers only\n"); _p = p;_ptr_free = ptr_free;}
     ptr_smart(T p){_p = p;}
     ptr_smart(){_p = NULL;}
     ptr_smart(ptr_smart &&p){ _p = p._p; _ptr_free = p._ptr_free; p._p = NULL; p._ptr_free = NULL;}
@@ -54,8 +52,8 @@ class futurerestore {
     struct idevicerestore_client_t* _client;
     char *_ibootBuild = nullptr;
     bool _didInit = false;
-    vector<plist_t> _aptickets;
-    vector<pair<char *, size_t>>_im4ms;
+    std::vector<plist_t> _aptickets;
+    std::vector<std::pair<char *, size_t>>_im4ms;
     int _foundnonce = -1;
     bool _isUpdateInstall = false;
     bool _isPwnDfu = false;
@@ -67,13 +65,16 @@ class futurerestore {
 
     char *_firmwareJson = nullptr;
     char *_betaFirmwareJson = nullptr;
+    char *_otaFirmwareJson = nullptr;
     jssytok_t *_firmwareTokens = nullptr;;
     jssytok_t *_betaFirmwareTokens = nullptr;
+    jssytok_t *_otaFirmwareTokens = nullptr;
     char *_latestManifest = nullptr;
     char *_latestFirmwareUrl = nullptr;
     bool _useCustomLatest = false;
     bool _useCustomLatestBuildID = false;
     bool _useCustomLatestBeta = false;
+    bool _useCustomLatestOTA = false;
     std::string _customLatest;
     std::string _customLatestBuildID;
     const char *_model = nullptr;
@@ -89,6 +90,15 @@ class futurerestore {
     std::string _sepManifestPath;
     std::string _basebandPath;
     std::string _basebandManifestPath;
+
+
+// TODO: implement windows CI and enable update check
+#ifndef WIN32
+    std::string latest_num;
+    std::string latest_sha;
+    std::string current_num = VERSION_COMMIT_COUNT;
+    std::string current_sha = VERSION_COMMIT_SHA;
+#endif
 
     const char *_custom_nonce = nullptr;
     const char *_boot_args = nullptr;
@@ -110,8 +120,8 @@ public:
     void setAutoboot(bool val);
     void exitRecovery();
     void waitForNonce();
-    void waitForNonce(vector<const char *>nonces, size_t nonceSize);
-    void loadAPTickets(const vector<const char *> &apticketPaths, bool extra);
+    void waitForNonce(std::vector<const char *>nonces, size_t nonceSize);
+    void loadAPTickets(const std::vector<const char *> &apticketPaths, bool extra);
     char *getiBootBuild();
     
     plist_t nonceMatchesApTickets();
@@ -124,6 +134,11 @@ public:
     char *getLatestFirmwareUrl();
     std::string getSepManifestPath(){return _sepManifestPath;}
     std::string getBasebandManifestPath(){return _basebandManifestPath;}
+
+// TODO: implement windows CI and enable update check
+#ifndef WIN32
+    void checkForUpdates();
+#endif
     void downloadLatestRose();
     void downloadLatestSE();
     void downloadLatestSavage();
@@ -142,10 +157,12 @@ public:
     void loadKernel(std::string kernelPath);
     void loadSep(std::string sepPath);
     void loadBaseband(std::string basebandPath);
+    char *readBaseband(std::string basebandPath, char *data, size_t *sz);
+    unsigned char *getSHABuffer(char *data, size_t dataSize, int type = 0);
     unsigned char *getSHA(const std::string& filePath, int type = 0);
 
     void setCustomLatest(std::string version){_customLatest = version; _useCustomLatest = true;}
-    void setCustomLatestBuildID(std::string version, bool beta){_customLatestBuildID = version; _useCustomLatest = false; _useCustomLatestBuildID = true; _useCustomLatestBeta = beta;}
+    void setCustomLatestBuildID(std::string version, bool beta, bool ota){_customLatestBuildID = version; _useCustomLatest = false; _useCustomLatestBuildID = true; _useCustomLatestBeta = beta; _useCustomLatestOTA = ota;}
     void setSepPath(std::string sepPath) {_sepPath = sepPath;}
     void setSepManifestPath(std::string sepManifestPath) {_sepManifestPath = sepManifestPath;}
     void setRamdiskPath(std::string ramdiskPath) {_ramdiskPath = ramdiskPath;}
@@ -177,8 +194,10 @@ public:
     static void saveStringToFile(std::string str, std::string path);
     static char *getPathOfElementInManifest(const char *element, const char *manifeststr, const char *boardConfig, int isUpdateInstall);
     static unsigned char *getDigestOfElementInManifest(const char *element, const char *manifeststr, const char *boardConfig, int isUpdateInstall);
+    static unsigned char *getBBCFGDigestInManifest(const char *manifeststr, const char *boardConfig, int isUpdateInstall);
     static bool elemExists(const char *element, const char *manifeststr, const char *boardConfig, int isUpdateInstall);
     static std::string getGeneratorFromSHSH2(plist_t shsh2);
+    static const char *extractZipFileToString(char *zip_buffer, const char *file, uint32_t *sz);
 
 };
 

@@ -42,6 +42,7 @@ static struct option longopts[] = {
         { "custom-latest-buildid",      required_argument,      nullptr, 'g' },
         { "help",                       no_argument,            nullptr, 'h' },
         { "custom-latest-beta",         no_argument,            nullptr, 'i' },
+        { "custom-latest-ota",          no_argument,            nullptr, 'k' },
         { "latest-sep",                 no_argument,            nullptr, '0' },
         { "no-restore",                 no_argument,            nullptr, 'z' },
         { "latest-baseband",            no_argument,            nullptr, '1' },
@@ -79,7 +80,10 @@ static struct option longopts[] = {
 #define FLAG_CUSTOM_LATEST          1 << 15
 #define FLAG_CUSTOM_LATEST_BUILDID  1 << 16
 #define FLAG_CUSTOM_LATEST_BETA     1 << 17
-#define FLAG_NO_RSEP_FR             1 << 18
+#define FLAG_CUSTOM_LATEST_OTA      1 << 18
+#define FLAG_NO_RSEP_FR             1 << 19
+
+bool manual = false;
 
 void cmd_help(){
     printf("Usage: futurerestore [OPTIONS] iPSW\n");
@@ -95,35 +99,40 @@ void cmd_help(){
     printf("  -z, --no-restore\t\t\tDo not restore and end right before NOR data is sent\n");
     printf("  -c, --custom-latest VERSION\t\tSpecify custom latest version to use for SEP, Baseband and other FirmwareUpdater components\n");
     printf("  -g, --custom-latest-buildid BUILDID\tSpecify custom latest buildid to use for SEP, Baseband and other FirmwareUpdater components\n");
-    printf("  -i, --custom-latest-beta\t\tGet custom url from list of beta firmwares");
+    printf("  -i, --custom-latest-beta\t\tGet custom url from list of beta firmwares\n");
+    printf("  -k, --custom-latest-ota\t\tGet custom url from list of ota firmwares");
 
 #ifdef HAVE_LIBIPATCHER
     printf("\nOptions for downgrading with Odysseus:\n");
-    printf("      --use-pwndfu\t\t\tRestoring devices with Odysseus method. Device needs to be in pwned DFU mode already\n");
-    printf("      --no-ibss\t\t\t\tRestoring devices with Odysseus method. For checkm8/iPwnder32 specifically, bootrom needs to be patched already with unless iPwnder.\n");
-    printf("      --rdsk PATH\t\t\tSet custom restore ramdisk for entering restoremode(requires use-pwndfu)\n");
-    printf("      --rkrn PATH\t\t\tSet custom restore kernelcache for entering restoremode(requires use-pwndfu)\n");
-    printf("      --set-nonce\t\t\tSet custom nonce from your blob then exit recovery(requires use-pwndfu)\n");
-    printf("      --set-nonce=0xNONCE\t\tSet custom nonce then exit recovery(requires use-pwndfu)\n");
-    printf("      --serial\t\t\t\tEnable serial during boot(requires serial cable and use-pwndfu)\n");
-    printf("      --boot-args\t\t\tSet custom restore boot-args(PROCEED WITH CAUTION)(requires use-pwndfu)\n");
-    printf("      --no-cache\t\t\tDisable cached patched iBSS/iBEC(requires use-pwndfu)\n");
-    printf("      --skip-blob\t\t\tSkip SHSH blob validation(PROCEED WITH CAUTION)(requires use-pwndfu)\n");
+    printf("  -3, --use-pwndfu\t\t\tRestoring devices with Odysseus method. Device needs to be in pwned DFU mode already\n");
+    printf("  -4, --no-ibss\t\t\t\tRestoring devices with Odysseus method. For checkm8/iPwnder32 specifically, bootrom needs to be patched already with unless iPwnder.\n");
+    printf("  -5, --rdsk PATH\t\t\tSet custom restore ramdisk for entering restoremode(requires use-pwndfu)\n");
+    printf("  -6, --rkrn PATH\t\t\tSet custom restore kernelcache for entering restoremode(requires use-pwndfu)\n");
+    printf("  -7, --set-nonce\t\t\tSet custom nonce from your blob then exit recovery(requires use-pwndfu)\n");
+    printf("  -7, --set-nonce=0xNONCE\t\tSet custom nonce then exit recovery(requires use-pwndfu)\n");
+    printf("  -8, --serial\t\t\t\tEnable serial during boot(requires serial cable and use-pwndfu)\n");
+    printf("  -9, --boot-args\t\t\tSet custom restore boot-args(PROCEED WITH CAUTION)(requires use-pwndfu)\n");
+    printf("  -a, --no-cache\t\t\tDisable cached patched iBSS/iBEC(requires use-pwndfu)\n");
+    printf("  -f, --skip-blob\t\t\tSkip SHSH blob validation(PROCEED WITH CAUTION)(requires use-pwndfu)\n");
 #endif
 
     printf("\nOptions for SEP:\n");
-    printf("      --latest-sep\t\t\tUse latest signed SEP instead of manually specifying one\n");
-    printf("  -s, --sep PATH\t\t\tSEP to be flashed\n");
-    printf("  -m, --sep-manifest PATH\t\tBuildManifest for requesting SEP ticket\n");
-    printf("  -j, --no-rsep\t\tChoose not to send Restore Mode SEP\n");
+    printf("  -0, --latest-sep\t\t\tUse latest signed SEP instead of manually specifying one\n");
+    if(manual) {
+        printf("  -s, --sep PATH\t\t\tSEP to be flashed\n");
+        printf("  -m, --sep-manifest PATH\t\tBuildManifest for requesting SEP ticket\n");
+    }
     printf("  -S, --sep-ticket PATH\t\t\tSpecify custom SEP ticket instead of requesting one\n");
+    printf("  -j, --no-rsep\t\t\t\tChoose not to send Restore Mode SEP firmware command\n");
 
     printf("\nOptions for baseband:\n");
-    printf("      --latest-baseband\t\t\tUse latest signed baseband instead of manually specifying one\n");
-    printf("  -b, --baseband PATH\t\t\tBaseband to be flashed\n");
-    printf("  -p, --baseband-manifest PATH\t\tBuildManifest for requesting baseband ticket\n");
+    printf("  -1, --latest-baseband\t\t\tUse latest signed baseband instead of manually specifying one\n");
+    if(manual) {
+        printf("  -b, --baseband PATH\t\t\tBaseband to be flashed\n");
+        printf("  -p, --baseband-manifest PATH\t\tBuildManifest for requesting baseband ticket\n");
+    }
     //printf("  -B, --baseband-ticket PATH\t\tSpecify custom baseband ticket instead of requesting one\n");
-    printf("      --no-baseband\t\t\tSkip checks and don't flash baseband\n");
+    printf("  -2, --no-baseband\t\t\tSkip checks and don't flash baseband\n");
     printf("                   \t\t\tOnly use this for device without a baseband (eg. iPod touch or some Wi-Fi only iPads)\n\n");
 }
 
@@ -171,12 +180,18 @@ int main_r(int argc, const char * argv[]) {
     t_devicevals devVals = {nullptr};
     t_iosVersion versVals = {nullptr};
 
+    char *legacy = std::getenv("FUTURERESTORE_I_SOLEMNLY_SWEAR_THAT_I_AM_UP_TO_NO_GOOD");
+    manual = legacy != nullptr;
+    if(manual) {
+        info("WARNING: User specified to enable Deprecated/Legacy options, at risk of boot loop!\n");
+    }
+
     if (argc == 1){
         cmd_help();
         return -1;
     }
 
-    while ((opt = getopt_long(argc, (char* const *)argv, "ht:b:p:s:m:c:g:hiwude0z123456789afj", longopts, &optindex)) > 0) {
+    while ((opt = getopt_long(argc, (char* const *)argv, "ht:b:p:s:m:c:g:hikwude0z123456789afj", longopts, &optindex)) > 0) {
         switch (opt) {
             case 'h': // long option: "help"; can be called as short option
                 cmd_help();
@@ -186,18 +201,22 @@ int main_r(int argc, const char * argv[]) {
                 apticketPaths.push_back(optarg);
                 break;
             case 'b': // long option: "baseband"; can be called as short option
+                retassure(manual, "--baseband is Deprecated! Please switch to --custom-latest or --custom-latest-beta.");
                 basebandPath = optarg;
                 break;
             case 'p': // long option: "baseband-manifest"; can be called as short option
+                retassure(manual, "--baseband-manifest is Deprecated! Please switch to --custom-latest or --custom-latest-beta.");
                 basebandManifestPath = optarg;
                 break;
             //case 'B': // long option: "baseband-ticket"; can be called as short option
             //    bbticketPaths.push_back(optarg);
             //    break;
             case 's': // long option: "sep"; can be called as short option
+                retassure(manual, "--sep is Deprecated! Please switch to --custom-latest or --custom-latest-beta.");
                 sepPath = optarg;
                 break;
             case 'm': // long option: "sep-manifest"; can be called as short option
+                retassure(manual, "--sep-manifest is Deprecated! Please switch to --custom-latest or --custom-latest-beta.");
                 sepManifestPath = optarg;
                 break;
             case 'S': // long option: "sep-ticket"; can be called as short option
@@ -219,6 +238,9 @@ int main_r(int argc, const char * argv[]) {
                 break;
             case 'i': // long option: "custom-latest-beta"; can be called as short option
                 flags |= FLAG_CUSTOM_LATEST_BETA;
+                break;
+            case 'k': // long option: "custom-latest-ota"; can be called as short option
+                flags |= FLAG_CUSTOM_LATEST_OTA;
                 break;
             case '0': // long option: "latest-sep";
                 flags |= FLAG_LATEST_SEP;
@@ -332,6 +354,8 @@ int main_r(int argc, const char * argv[]) {
         retassure((flags & FLAG_IS_PWN_DFU),"--skip-blob requires --use-pwndfu\n");
     if(flags & FLAG_CUSTOM_LATEST_BETA)
         retassure((flags & FLAG_CUSTOM_LATEST_BUILDID),"-i, --custom-latest-beta requires -g, --custom-latest-buildid\n");
+    if(flags & FLAG_CUSTOM_LATEST_OTA)
+        retassure((flags & FLAG_CUSTOM_LATEST_BUILDID),"-k, --custom-latest-ota requires -g, --custom-latest-buildid\n");
     if(flags & FLAG_CUSTOM_LATEST_BUILDID)
         retassure((flags & FLAG_CUSTOM_LATEST) == 0,"-g, --custom-latest-buildid is not compatible with -c, --custom-latest\n");
 
@@ -358,7 +382,7 @@ int main_r(int argc, const char * argv[]) {
             client.setCustomLatest(customLatest);
         }
         if(!customLatestBuildID.empty()) {
-            client.setCustomLatestBuildID(customLatestBuildID, (flags & FLAG_CUSTOM_LATEST_BETA) != 0);
+            client.setCustomLatestBuildID(customLatestBuildID, (flags & FLAG_CUSTOM_LATEST_BETA) != 0, (flags & FLAG_CUSTOM_LATEST_OTA) != 0);
         }
 
         if (!(
