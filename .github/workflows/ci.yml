@@ -16,52 +16,59 @@ jobs:
     env:
       PROCURSUS: /opt/procursus
       PATH: /opt/procursus/bin:/opt/procursus/libexec/gnubin:/usr/local/lib/ruby/gems/2.7.0/bin:/usr/local/opt/ruby@2.7/bin:/usr/local/opt/pipx_bin:/Users/runner/.cargo/bin:/usr/local/opt/curl/bin:/usr/local/bin:/usr/local/sbin:/Users/runner/bin:/Users/runner/.yarn/bin:/Users/runner/Library/Android/sdk/tools:/Users/runner/Library/Android/sdk/platform-tools:/Users/runner/Library/Android/sdk/ndk-bundle:/Library/Frameworks/Mono.framework/Versions/Current/Commands:/usr/bin:/bin:/usr/sbin:/sbin:/Users/runner/.dotnet/tools:/Users/runner/.ghcup/bin:/Users/runner/hostedtoolcache/stack/2.7.3/x64
-    runs-on: macos-11
+    runs-on: macos-12
     steps:
     - name: Checkout
+      id: Checkout
       uses: actions/checkout@v2
       with:
         submodules: 'true'
         fetch-depth: 0
+    - name: Update Xcode
+      id: Update-Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '14.1.0'
     - name: macOS Build
       id: macOS-Build
       run: |
-        /Users/runner/work/futurerestore/futurerestore/.github/workflows/mac-bootstrap.sh
-        /Users/runner/work/futurerestore/futurerestore/.github/workflows/mac-build.sh
-        /Users/runner/work/futurerestore/futurerestore/.github/workflows/mac-post.sh
+        ${{ github.workspace }}/.github/workflows/mac-bootstrap.sh
+        ${{ github.workspace }}/.github/workflows/mac-build.sh
+        ${{ github.workspace }}/.github/workflows/mac-post.sh
     - name: Versioning
       id: Versioning
       uses: actions/upload-artifact@v2
       with:
         name: Versioning
         path: |
-          /Users/runner/work/futurerestore/futurerestore/latest_build_sha.txt
-          /Users/runner/work/futurerestore/futurerestore/latest_build_num.txt
+          ${{ github.workspace }}/latest_build_sha.txt
+          ${{ github.workspace }}/latest_build_num.txt
     - name: macOS RELEASE Archive
       id: macOS-RELEASE-Archive
       uses: actions/upload-artifact@v2
       with:
         name: futurerestore-macOS-RELEASE
         path: |
-          /Users/runner/work/futurerestore/futurerestore/futurerestore-macOS-*-RELEASE.tar.xz
+          ${{ github.workspace }}/futurerestore-macOS-*-RELEASE.tar.xz
     - name: macOS DEBUG Archive
       id: macOS-DEBUG-Archive
       uses: actions/upload-artifact@v2
       with:
         name: futurerestore-macOS-DEBUG
         path: |
-          /Users/runner/work/futurerestore/futurerestore/futurerestore-macOS-*-DEBUG.tar.xz
+          ${{ github.workspace }}/futurerestore-macOS-*-DEBUG.tar.xz
     - name: macOS ASAN Archive
       id: macOS-ASAN-Archive
       uses: actions/upload-artifact@v2
       with:
         name: futurerestore-macOS-ASAN
         path: |
-          /Users/runner/work/futurerestore/futurerestore/futurerestore-macOS-*-ASAN.tar.xz
+          ${{ github.workspace }}/futurerestore-macOS-*-ASAN.tar.xz
   Linux:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
+        id: Checkout
         uses: actions/checkout@v2
         with:
           submodules: 'true'
@@ -76,42 +83,38 @@ jobs:
             /tmp/Builder/repos/futurerestore/.github/workflows/linux-bootstrap.sh
             /tmp/Builder/repos/futurerestore/.github/workflows/linux-build.sh
             /tmp/Builder/repos/futurerestore/.github/workflows/linux-post.sh
+            mkdir -p ${{ github.workspace }}/.github/workflows/
       - name: Linux x86_64 RELEASE Build
+        id: Linux-x86_64-RELEASE-Build
         run: |
-          mkdir -p /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          docker cp $(docker ps -ql):/tmp/Builder/repos/futurerestore/.github/workflows/name1.txt /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          docker cp $(docker ps -ql):/tmp/Builder/repos/futurerestore/.github/workflows/futurerestore1.tar.xz /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          mv /home/runner/work/futurerestore/futurerestore/.github/workflows/futurerestore1.tar.xz /home/runner/work/futurerestore/futurerestore/.github/workflows/$(cat /home/runner/work/futurerestore/futurerestore/.github/workflows/name1.txt)
+          sudo chown -R $USER:$USER ${{ github.workspace }}/../
+          mv ${{ github.workspace }}/.github/workflows/futurerestore1.tar.xz ${{ github.workspace }}/.github/workflows/$(cat ${{ github.workspace }}/.github/workflows/name1.txt)
       - name: Linux x86_64 DEBUG Build
+        id: Linux-x86_64-DEBUG-Build
         run: |
-          mkdir -p /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          docker cp $(docker ps -ql):/tmp/Builder/repos/futurerestore/.github/workflows/name2.txt /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          docker cp $(docker ps -ql):/tmp/Builder/repos/futurerestore/.github/workflows/futurerestore2.tar.xz /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          mv /home/runner/work/futurerestore/futurerestore/.github/workflows/futurerestore2.tar.xz /home/runner/work/futurerestore/futurerestore/.github/workflows/$(cat /home/runner/work/futurerestore/futurerestore/.github/workflows/name2.txt)
+          mv ${{ github.workspace }}/.github/workflows/futurerestore2.tar.xz ${{ github.workspace }}/.github/workflows/$(cat ${{ github.workspace }}/.github/workflows/name2.txt)
       - name: Linux x86_64 ASAN Build
+        id: Linux-x86_64-ASAN-Build
         run: |
-          mkdir -p /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          docker cp $(docker ps -ql):/tmp/Builder/repos/futurerestore/.github/workflows/name3.txt /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          docker cp $(docker ps -ql):/tmp/Builder/repos/futurerestore/.github/workflows/futurerestore3.tar.xz /home/runner/work/futurerestore/futurerestore/.github/workflows/
-          mv /home/runner/work/futurerestore/futurerestore/.github/workflows/futurerestore3.tar.xz /home/runner/work/futurerestore/futurerestore/.github/workflows/$(cat /home/runner/work/futurerestore/futurerestore/.github/workflows/name3.txt)
+          mv ${{ github.workspace }}/.github/workflows/futurerestore3.tar.xz ${{ github.workspace }}/.github/workflows/$(cat ${{ github.workspace }}/.github/workflows/name3.txt)
       - name: futurerestore Linux x86_64 RELEASE Archive
         id: futurerestore-Linux-x86_64-RELEASE-Archive
         uses: actions/upload-artifact@v2
         with:
           name: futurerestore-Linux-x86_64-RELEASE
           path: |
-            /home/runner/work/futurerestore/futurerestore/.github/workflows/futurerestore-Linux-x86_64*-RELEASE.tar.xz
+            ${{ github.workspace }}/.github/workflows/futurerestore-Linux-x86_64*-RELEASE.tar.xz
       - name: futurerestore Linux x86_64 DEBUG Archive
         id: futurerestore-Linux-x86_64-DEBUG-Archive
         uses: actions/upload-artifact@v2
         with:
           name: futurerestore-Linux-x86_64-DEBUG
           path: |
-            /home/runner/work/futurerestore/futurerestore/.github/workflows/futurerestore-Linux-x86_64*-DEBUG.tar.xz
+            ${{ github.workspace }}/.github/workflows/futurerestore-Linux-x86_64*-DEBUG.tar.xz
       - name: futurerestore Linux x86_64 ASAN Archive
         id: futurerestore-Linux-x86_64-ASAN-Archive
         uses: actions/upload-artifact@v2
         with:
           name: futurerestore-Linux-x86_64-ASAN
           path: |
-            /home/runner/work/futurerestore/futurerestore/.github/workflows/futurerestore-Linux-x86_64*-ASAN.tar.xz
+            ${{ github.workspace }}/.github/workflows/futurerestore-Linux-x86_64*-ASAN.tar.xz
